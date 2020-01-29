@@ -17,7 +17,7 @@ class CacheInterceptor extends Interceptor {
 
   CacheInterceptor({CacheOptions options, this.logger})
       : this.options = options ?? const CacheOptions(),
-        this._globalStore = options.store ?? MemoryCacheStore();
+        this._globalStore = options?.store ?? MemoryCacheStore();
 
   CacheOptions _optionsForRequest(RequestOptions options) {
     return CacheOptions.fromExtra(options) ?? this.options;
@@ -56,6 +56,7 @@ class CacheInterceptor extends Interceptor {
       return await super.onRequest(options);
     }
 
+    logger?.fine("[$cacheKey][${options.uri}] Using existing response from ${existing.downloadedAt} expires at ${existing.expiry}");
     return existing.toResponse(options);
   }
 
@@ -85,6 +86,9 @@ class CacheInterceptor extends Interceptor {
     if (!extras.isFromCache && requestExtra.isCached) {
       if (response.statusCode == HttpStatus.notModified) {
         final existing = CacheResponse.fromRequestOptions(response.request);
+        // TODO should update existing cache response with new expiry
+        final cacheKey = requestExtra.keyBuilder(response.request);
+        logger?.fine("[$cacheKey][${response.request.uri}] Not modified.  Using existing response from ${existing.downloadedAt} expires at ${existing.expiry}");
         return existing.toResponse(response.request);
       }
 
@@ -94,7 +98,7 @@ class CacheInterceptor extends Interceptor {
         final newCache = await CacheResponse.fromResponse(
             cacheKey, response, expiry, requestExtra.priority);
         logger?.fine(
-            "[$cacheKey][${response.request.uri}] Creating a new cache entry than expires on  $expiry");
+            "[$cacheKey][${response.request.uri}] Creating a new cache entry that expires on $expiry");
         await store.set(newCache);
       }
     }

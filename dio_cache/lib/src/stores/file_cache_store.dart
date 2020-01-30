@@ -92,11 +92,11 @@ List<int> _serializeCacheResponse(CacheResponse response) {
   final encodedUrl = utf8.encode(response.url);
   final encodedEtag = utf8.encode(response.eTag ?? "");
   final encodedExpiry =
-      Int32List.fromList([response.expiry.millisecondsSinceEpoch])
+      Int64List.fromList([response.expiry.millisecondsSinceEpoch])
           .buffer
           .asInt8List();
   return []
-    ..addAll(Int64List.fromList(
+    ..addAll(Int32List.fromList(
             [encodedUrl.length, encodedEtag.length, encodedExpiry.length])
         .buffer
         .asInt8List())

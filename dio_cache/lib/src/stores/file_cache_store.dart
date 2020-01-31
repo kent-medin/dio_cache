@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:path/path.dart' as path;
 import 'package:uuid/uuid.dart';
+import 'package:logging/logging.dart';
 
 import '../cache_response.dart';
 import 'cache_store.dart';
@@ -16,8 +17,9 @@ import 'cache_store.dart';
 class FileCacheStore extends CacheStore {
   final uuid = Uuid();
   final Map<CachePriority, Directory> directories;
+  final Logger logger;
 
-  FileCacheStore(Directory directory)
+  FileCacheStore(Directory directory, [this.logger])
       : this.directories =
             Map.fromEntries(Iterable.generate(CachePriority.values.length, (i) {
           final priority = CachePriority.values[i];
@@ -34,6 +36,29 @@ class FileCacheStore extends CacheStore {
     }
 
     return null;
+  }
+
+  Future<void> evictExpiredEntries(DateTime expiration) async {
+    var futures = <Future<FileSystemEntity>>[];
+    for (var directory in directories.values) {
+      if (!directory.existsSync()) {
+        continue;
+      }
+
+      for (var file in directory.listSync()) {
+        // TODO don't read in the entire cached response
+        final existing = await _deserializeCacheResponse(file);
+        logger?.finest('[${existing.url}] Checking for expirations; $expiration vs. ${existing.expiry}');
+        if (existing.expiry.isBefore(expiration)) {
+          logger?.fine('[${existing.url}] Deleting expired cached response from ${existing.downloadedAt} with expiry ${existing.expiry}');
+          futures.add(file.delete().catchError((e) {
+            logger?.warning('Unable to delete expired response ${file.path}', e);
+          }));
+        }
+      }
+    }
+
+    return Future.wait(futures);
   }
 
   @override

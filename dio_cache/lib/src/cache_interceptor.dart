@@ -84,25 +84,71 @@ class CacheInterceptor extends Interceptor {
 
     // If response is not extracted from cache we save it into the store
     if (!extras.isFromCache && requestExtra.isCached) {
+      final cacheControlDirectives = parseCacheControl(response.headers['cache-control']);
+      final int maxAge = parseInt(cacheControlDirectives['max-age']);
+
+
+      // TODO check for other cache-control directives (e.g. no-cache)
+      if (maxAge == 0) {
+        logger?.fine('[${response.request.uri}] Not caching response because server wants it uncached');
+        return await super.onResponse(response);
+      }
+
+      final cacheKey = requestExtra.keyBuilder(response.request);
+      final expiryDateTime = DateTime.now().add(Duration(seconds: maxAge) ?? requestExtra.expiry);
+
       if (response.statusCode == HttpStatus.notModified) {
         final existing = CacheResponse.fromRequestOptions(response.request);
-        // TODO should update existing cache response with new expiry
-        final cacheKey = requestExtra.keyBuilder(response.request);
-        logger?.fine("[$cacheKey][${response.request.uri}] Not modified.  Using existing response from ${existing.downloadedAt} expires at ${existing.expiry}");
+        await store.updateExpiry(cacheKey, expiryDateTime);
+
+        logger?.fine("[$cacheKey][${response.request.uri}] Not modified.  Using existing response from ${existing.downloadedAt} now expires at ${existing.expiry}");
         return existing.toResponse(response.request);
       }
 
       if (isValidHttpStatusCode(response.statusCode)) {
-        final cacheKey = requestExtra.keyBuilder(response.request);
-        final expiry = DateTime.now().add(requestExtra.expiry);
         final newCache = await CacheResponse.fromResponse(
-            cacheKey, response, expiry, requestExtra.priority);
+            cacheKey, response, expiryDateTime, requestExtra.priority);
         logger?.fine(
-            "[$cacheKey][${response.request.uri}] Creating a new cache entry that expires on $expiry");
+            "[$cacheKey][${response.request.uri}] Creating a new cache entry that expires on $expiryDateTime");
         await store.set(newCache);
       }
     }
 
     return await super.onResponse(response);
   }
+
+Map<String, String> parseCacheControl(List<String> cacheControl) {
+  if (cacheControl == null) {
+    return {};
+  }
+
+  Map<String, String> cacheControlEntries = {};
+  cacheControl.forEach((cc) {
+    cc.split(',').forEach((e) {
+      var parts = e.split('=');
+      var left = stripQuotes(parts[0].trim());
+      var right = stripQuotes(parts.length == 1 ? null : parts[1].trim());
+      cacheControlEntries[left] = right;
+    });
+  });
+
+  return cacheControlEntries;
+}
+
+String stripQuotes(String s) {
+  if (s == null) {
+    return null;
+  }
+  
+  if (s[0] == '\'' || s[0] == '"') {
+    return s.substring(1, s.length - 1);
+  }
+  
+  return s;
+}
+
+int parseInt(String s) {
+  return s == null ? null : int.tryParse(s);
+  
+}
 }

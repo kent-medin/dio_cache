@@ -20,6 +20,7 @@ class CacheInterceptor extends Interceptor {
         this._globalStore = options?.store ?? MemoryCacheStore();
 
   CacheOptions _optionsForRequest(RequestOptions options) {
+  // TODO if the user specifies per request options they may not have included a keyBuilder or a store within those options.
     return CacheOptions.fromExtra(options) ?? this.options;
   }
 
@@ -95,7 +96,7 @@ class CacheInterceptor extends Interceptor {
       }
 
       final cacheKey = requestExtra.keyBuilder(response.request);
-      final expiryDateTime = DateTime.now().add(Duration(seconds: maxAge) ?? requestExtra.expiry);
+      final expiryDateTime = DateTime.now().add(maxAge == null ? requestExtra.expiry : Duration(seconds: maxAge));
 
       if (response.statusCode == HttpStatus.notModified) {
         final existing = CacheResponse.fromRequestOptions(response.request);

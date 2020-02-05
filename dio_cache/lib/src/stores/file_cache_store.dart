@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
 import 'package:uuid/uuid.dart';
-import 'package:logging/logging.dart';
 
 import '../cache_response.dart';
 import 'cache_store.dart';
@@ -21,11 +21,11 @@ class FileCacheStore extends CacheStore {
 
   FileCacheStore(Directory directory, [this.logger])
       : this.directories =
-            Map.fromEntries(Iterable.generate(CachePriority.values.length, (i) {
-          final priority = CachePriority.values[i];
-          return MapEntry(priority,
-              Directory(path.join(directory.path, priority.index.toString())));
-        }));
+  Map.fromEntries(Iterable.generate(CachePriority.values.length, (i) {
+    final priority = CachePriority.values[i];
+    return MapEntry(priority,
+        Directory(path.join(directory.path, priority.index.toString())));
+  }));
 
   File _findFile(String key) {
     for (var item in directories.entries) {
@@ -38,7 +38,7 @@ class FileCacheStore extends CacheStore {
     return null;
   }
 
-  Future<void> evictExpiredEntries(DateTime expiration) async {
+  Future<void> deleteOldEntries(DateTime cutoff) async {
     var futures = <Future<FileSystemEntity>>[];
     for (var directory in directories.values) {
       if (!directory.existsSync()) {
@@ -46,11 +46,14 @@ class FileCacheStore extends CacheStore {
       }
 
       for (var file in directory.listSync()) {
-        // TODO don't read in the entire cached response
-        final existing = await _deserializeCacheResponse(file);
-        logger?.finest('[${existing.url}] Checking for expirations; $expiration vs. ${existing.expiry}');
-        if (existing.expiry.isBefore(expiration)) {
-          logger?.fine('[${existing.url}] Deleting expired cached response from ${existing.downloadedAt} with expiry ${existing.expiry}');
+        final lastModified = (file as File).lastModifiedSync();
+        if (lastModified.isBefore(cutoff)) {
+          if (logger?.isLoggable(Level.FINE)) {
+            // TODO don't read in the entire cached response
+            final existing = await _deserializeCacheResponse(file);
+            logger?.fine('[${existing.url}] Deleting cached response from ${existing.downloadedAt}');
+          }
+          
           futures.add(file.delete().catchError((e) {
             logger?.warning('Unable to delete expired response ${file.path}', e);
           }));
@@ -102,8 +105,7 @@ class FileCacheStore extends CacheStore {
   }
 
   @override
-  Future<void> updateExpiry(
-      String key, DateTime newExpiry) async {
+  Future<void> updateExpiry(String key, DateTime newExpiry) async {
     final file = await _findFile(key);
     if (file != null) {
       final previous = await _deserializeCacheResponse(file);
@@ -117,26 +119,25 @@ List<int> _serializeCacheResponse(CacheResponse response) {
   final encodedUrl = utf8.encode(response.url);
   final encodedEtag = utf8.encode(response.eTag ?? "");
   final encodedExpiry =
-      Int64List.fromList([response.expiry.millisecondsSinceEpoch])
-          .buffer
-          .asInt8List();
-  return []
-    ..addAll(Int32List.fromList(
-            [encodedUrl.length, encodedEtag.length, encodedExpiry.length])
-        .buffer
-        .asInt8List())
-    ..addAll(encodedUrl)
-    ..addAll(encodedEtag)
-    ..addAll(encodedExpiry)
-    ..addAll(response.content);
+  Int64List
+      .fromList([response.expiry.millisecondsSinceEpoch])
+      .buffer
+      .asInt8List();
+  return []..addAll(Int32List
+      .fromList(
+      [encodedUrl.length, encodedEtag.length, encodedExpiry.length])
+      .buffer
+      .asInt8List())..addAll(encodedUrl)..addAll(encodedEtag)..addAll(encodedExpiry)..addAll(response.content);
 }
 
 Future<CacheResponse> _deserializeCacheResponse(File file) async {
-  
   final data = await file.readAsBytes();
 
   var i = 4 + 4 + 4;
-  final sizes = Int8List.fromList(data.take(i).toList()).buffer.asInt32List();
+  final sizes = Int8List
+      .fromList(data.take(i).toList())
+      .buffer
+      .asInt32List();
 
   var size = sizes[0];
   final decodedUrl = utf8.decode(data.skip(i).take(size).toList());
@@ -147,7 +148,8 @@ Future<CacheResponse> _deserializeCacheResponse(File file) async {
 
   i += size;
   size = sizes[2];
-  final decodedExpiry = Int8List.fromList(data.skip(i).take(size).toList())
+  final decodedExpiry = Int8List
+      .fromList(data.skip(i).take(size).toList())
       .buffer
       .asInt64List()
       .first;
